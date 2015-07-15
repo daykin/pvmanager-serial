@@ -1,5 +1,7 @@
 package org.csstudio.utility.pvmanager.serial;
 
+
+
 import gnu.io.CommPortIdentifier;
 import gnu.io.SerialPort;
 import gnu.io.SerialPortEvent;
@@ -16,22 +18,16 @@ import java.util.Map;
 import java.util.TooManyListenersException;
 import java.util.logging.Level;
 
+
 import org.epics.pvmanager.ChannelWriteCallback;
 import org.epics.pvmanager.MultiplexedChannelHandler;
-import org.epics.vtype.VByte;
-import org.epics.vtype.VDouble;
-import org.epics.vtype.VFloat;
-import org.epics.vtype.VInt;
-import org.epics.vtype.VLong;
-import org.epics.vtype.VShort;
-import org.epics.vtype.VString;
-import org.epics.vtype.VType;
-import org.epics.vtype.ValueFactory;
+import org.epics.vtype.*;
 
 /**
  * Handles logic and events for SerialDataSource
  * @author daykin
  */
+
 public class SerialChannelHandler extends 
 MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 {
@@ -64,7 +60,7 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 	* hierarchial uri parameter in {@link SerialDataSource}.createChannel()
 	* @param datasource an instance of SerialDataSource
 	* @param channelName the channel name
-	* @param comPort serial port to use e.g. COM4 (Windows), dev/tty0(UN*X),
+	* @param port serial port to use e.g. COM4 (Windows), dev/tty0(UN*X),
 	* @param baudRate the baud rate (default 9600); 
 	* recommended: 115200 or less
 	* @param dataBits the number of bits per cycle, supports 5,6,7,or 8
@@ -73,7 +69,7 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 	* 
 	*/
 	SerialChannelHandler(SerialDataSource datasource, String channelName,
-			String comPort, int baudRate, int dataBits, 
+			String port, int baudRate, int dataBits, 
 			char parity, int stopBits)
 		{			
 		super(channelName);
@@ -83,9 +79,8 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 		this.parity = parity;
 		try 
 			{
-			com = CommPortIdentifier.getPortIdentifier(comPort);
+			com = CommPortIdentifier.getPortIdentifier(port);
 			serialPort = (SerialPort) com.open(channelName,5000);
-		
 			}			
 		catch (Exception e) 
 			{
@@ -97,17 +92,17 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 	*/
 	@Override
 	protected synchronized void connect() 
-	{
-		processConnection(serialPort);		
+	{				
 		try 
 		{
 			serialPort.setSerialPortParams(baud, dataBits, stopBits, 
-					parityMap.getOrDefault(this.parity,0));
+					parityMap.getOrDefault(parity, 0));
 			serialPort.addEventListener(this);
 			serialPort.notifyOnDataAvailable(true);
 			os = serialPort.getOutputStream();
 			input = new BufferedReader(new InputStreamReader
-					(serialPort.getInputStream()));	
+					(serialPort.getInputStream()));
+			processConnection(serialPort);
 		} 
 		catch (UnsupportedCommOperationException | 
 				TooManyListenersException | IOException e)
@@ -117,34 +112,73 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 		} 	
 	}
 	
+	@Override
+	protected boolean isWriteConnected(Object o){
+		return true;
+	}
+	
+	
+	public static synchronized boolean isInteger(String s){
+		try{
+			Integer.parseInt(s);
+			return true;
+		}
+		catch(NumberFormatException | NullPointerException e){
+			return false;
+		}
+	}
+
+	public static synchronized boolean isDouble(String s){
+		try{
+			Double.parseDouble(s);
+			return true;
+		}
+		catch(NumberFormatException | NullPointerException e){
+			return false;
+		}
+	}
+	
 	/**
 	* Processes a serial message.
 	*/
 	public synchronized void update()
 	{
-		Object value = readLineFromSerial();
-		processMessage(value);
+		try {
+			if(input.ready()){
+				String value = readLineFromSerial();
+				System.out.println(value);
+				System.out.println(isInteger(value));
+				if(isInteger(value)){
+					int out = Integer.parseInt(value);
+					processMessage(ValueFactory.newVInt(out,ValueFactory.alarmNone(), ValueFactory.timeNow(),ValueFactory.displayNone()));
+				}
+				else if(isDouble(value)){
+					Double doubleOut = Double.parseDouble(value);
+					processMessage(ValueFactory.newVDouble(doubleOut,ValueFactory.alarmNone(), ValueFactory.timeNow(),ValueFactory.displayNone()));
+				}
+				else{
+					processMessage(ValueFactory.newVString(value, ValueFactory.alarmNone(), ValueFactory.timeNow()));
+				}
+			}
+		} catch (IOException e) {
+			ValueFactory.newVString("INVALID",ValueFactory.newAlarm(AlarmSeverity.INVALID,
+					"Empty Response"),ValueFactory.timeNow());
+		}
 	}
 	
 	/**
 	* retrieve data from serial inputStream
 	* @return a line from the Serial input Stream
 	*/
-	protected synchronized Object readLineFromSerial()
+	protected synchronized String readLineFromSerial()
 	{
-		Object serialIn = "NaN";
-		try
-		{
-			if(input.ready())
-			{
-			serialIn=input.readLine();
-			}
+		try {			
+			return input.readLine();
 		} 
-		catch (IOException e) 
-		{
+		catch (IOException e) {			
 			reportExceptionToAllReadersAndWriters(e);
-		}
-		return serialIn;
+			return "NaN";
+		}		
 	}
 
 	/**
@@ -153,14 +187,14 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 	@Override
 	protected synchronized void disconnect() 
 	{
-		serialPort.close();
-		serialPort.removeEventListener();
 		try 
 		{
 			os.close();
-			input.close();
+			serialPort.close();
+			serialPort.removeEventListener();
+
 		} 
-		catch (IOException e)
+		catch (Exception e)
 		{
 			reportExceptionToAllReadersAndWriters(e);
 		}
@@ -176,7 +210,7 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 		if (!(newValue instanceof VType))
 		{
 			Object convertedValue = 
-					ValueFactory.toVTypeChecked(newValue);
+				ValueFactory.toVTypeChecked(newValue);
 			if(convertedValue != null){
 				newValue = convertedValue;
 			}
@@ -229,7 +263,7 @@ MultiplexedChannelHandler<Object,Object> implements SerialPortEventListener
 	}
 	
 	/**
-	* Event that is active whenever the serial output has data for us
+	* Event that is active whenever the serial output has data
 	* Implements rxtx SerialPortEventListener
 	* @param event- an event on the serial connection
 	*/

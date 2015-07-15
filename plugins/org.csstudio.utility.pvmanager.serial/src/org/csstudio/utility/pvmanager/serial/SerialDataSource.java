@@ -1,7 +1,6 @@
 package org.csstudio.utility.pvmanager.serial;
 
-import java.net.URI;
-import java.net.URISyntaxException;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
@@ -24,18 +23,16 @@ public class SerialDataSource extends DataSource {
 		super(true);
 	}
 	
-	public static Map<String,String> parseHierarchialURI(String uri) 
-			throws URISyntaxException
+	public static Map<String,String> parseArgs(String channelName) 
 		{
 		Map<String,String> parameters = new HashMap<String,String>();
-		URI host = new URI(uri);
-		String serialPort = host.getHost()+host.getPath();
-		if (serialPort.endsWith("/")){
-			serialPort = serialPort.substring(0, serialPort.length()-1);
+		
+		if (channelName.endsWith("/")){
+			channelName = channelName.substring(0, channelName.length()-1);
 		}
-		parameters.put("serialPort", serialPort);	
-		if(host.getQuery()!=null && !(uri.endsWith("?"))){   //if a non-null query is supplied
-		String query = uri.split("\\?")[1];
+		parameters.put("serialPort", channelName.split("\\?")[0]);
+		if(!(channelName.endsWith("?"))&&channelName.contains("?")){   //if a non-null query is supplied
+		String query = channelName.split("\\?")[1];
 		parameters.putAll(Splitter.on('&').trimResults().
 				withKeyValueSeparator("=").split(query));
 		}
@@ -52,23 +49,23 @@ public class SerialDataSource extends DataSource {
 	protected ChannelHandler createChannel(String channelName)
 	{
 		int baud = 9600, dataBits=8, stopBits=1;      
-		String config = "8n1",com=null;
+		String config = "8n1";
+		String com = "";
 		final String allowedParity = "neoms";
 		char parity = 'n';
 		HashMap<String,String> params = new HashMap<String,String>();
 		try {
-			params.putAll(parseHierarchialURI(channelName));	
+			params.putAll(parseArgs(channelName));	
 		} 
 		catch (Exception e) {
 			e.printStackTrace();
 			log.log(Level.WARNING,e.getMessage(),e);
 		}
-		com = params.get("serialPort");			
+		com = params.get("serialPort");
 		baud = Integer.parseInt(params.getOrDefault("baud","9600"));		
-		config = params.getOrDefault("config","8n1");
-		config.toLowerCase();
-		dataBits = Character.getNumericValue(config.charAt(0));
-		parity =  Character.toLowerCase(config.charAt(1));
+		dataBits = Integer.parseInt(params.getOrDefault("databits","8"));	
+		parity =  Character.toLowerCase(params.getOrDefault("parity", "n").charAt(0));
+		stopBits = Integer.parseInt(params.getOrDefault("stopbits","1"));
 		if(allowedParity.indexOf(parity)==-1){ //no parity if invalid spec
 			parity = 'n';
 		}
